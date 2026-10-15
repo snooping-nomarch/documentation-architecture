@@ -1,0 +1,61 @@
+@startuml c4-container
+!include <C4/C4_Container>
+
+LAYOUT_WITH_LEGEND()
+
+title Контейнерная диаграмма — Snooping Nomarch
+
+Person(consumer, "Разработчик или ИС-потребитель", "Обращается к провайдеру через шлюз по внутреннему ключу")
+Person(admin, "Администратор организации", "Настраивает провайдеров, ключи и лимиты")
+Person(analyst, "Аналитик бюджета", "Смотрит отчёты о потреблении и сверке")
+
+System_Boundary(sn, "Snooping Nomarch") {
+    Container(gateway, "Подсистема критического пути", "Go", "Проксирует запросы, проверяет лимиты, использует проекцию правил и кэш ответов")
+    Container(telemetry, "Подсистема телеметрии", "Kotlin", "Собирает факты обращений из Kafka и пишет их в ClickHouse")
+    Container(settings, "Подсистема настроек", "Kotlin", "Провайдеры, контракты, ключи, лимиты; источник событий для проекции")
+    Container(billing, "Подсистема биллинга", "Kotlin", "Учёт потребления, сверка и распределение по подразделениям")
+    Container(other_rules, "Прочие бизнес-правила", "Kotlin", "Дополнительные правила; тот же шаблон: PostgreSQL и Kafka")
+    Container(admin_bff, "Интерфейс администратора", "Kotlin", "Веб-интерфейс и API для настроек и отчётов")
+    Container(iam, "Сервис аутентификации", "Keycloak", "Выдаёт токены для интерфейса администратора")
+    Container(obs, "Стек наблюдаемости", "OpenTelemetry", "Метрики, трассы и алерты по всем подсистемам")
+
+    ContainerDb(redis_proj, "Кластер Redis", "Redis", "Проекция бизнес-правил и лимитов в памяти")
+    ContainerDb(redis_cache, "Кластер Redis", "Redis", "Кэш ответов провайдеров")
+    ContainerDb(ch, "Хранилище телеметрии", "ClickHouse", "Долгое хранение фактов обращений для анализа")
+    ContainerDb(pg_settings, "БД настроек", "PostgreSQL", "Мастер-данные провайдеров, ключей и лимитов")
+    ContainerDb(pg_billing, "БД биллинга", "PostgreSQL", "Периоды, сверка, распределение")
+    ContainerDb(pg_other, "БД прочих правил", "PostgreSQL", "Мастер-данные прочих бизнес-правил")
+    ContainerDb(kafka, "Шина событий", "Kafka", "Факты обращений и события изменения правил")
+    Container(vault, "Хранилище секретов", "Vault", "Ключи доступа к провайдерам")
+}
+
+System_Ext(providers, "Внешние провайдеры", "API поставщиков данных и сервисов")
+
+Rel(consumer, gateway, "HTTP", "Запрос к провайдеру через шлюз")
+Rel(gateway, providers, "HTTPS", "Исходящий запрос к провайдеру")
+Rel(gateway, redis_proj, "Читает", "Правила, лимиты, счётчики")
+Rel(gateway, redis_cache, "Читает и пишет", "Ответы провайдера")
+Rel(gateway, vault, "Читает", "Секреты ключей провайдера")
+Rel(gateway, kafka, "Публикует", "Факт обращения")
+Rel(kafka, telemetry, "Потребляет", "Факты обращений")
+Rel(telemetry, ch, "Пишет", "Строки телеметрии")
+Rel(settings, pg_settings, "Читает и пишет", "Мастер-данные")
+Rel(billing, pg_billing, "Читает и пишет", "Учёт и отчёты")
+Rel(other_rules, pg_other, "Читает и пишет", "Мастер-данные")
+Rel(settings, kafka, "Публикует", "События настроек")
+Rel(billing, kafka, "Публикует", "События биллинга")
+Rel(other_rules, kafka, "Публикует", "События правил")
+Rel(kafka, gateway, "Потребляет", "Обновление проекции")
+Rel(admin, admin_bff, "HTTPS", "Настройка и отчёты")
+Rel(analyst, admin_bff, "HTTPS", "Отчёты")
+Rel(admin_bff, iam, "OAuth2", "Аутентификация")
+Rel(admin_bff, settings, "REST", "Операции настроек")
+Rel(admin_bff, billing, "REST", "Операции отчётов")
+Rel(billing, ch, "Читает", "Агрегаты потребления")
+Rel(gateway, obs, "Экспортирует", "Трассы и метрики")
+Rel(telemetry, obs, "Экспортирует", "Трассы и метрики")
+Rel(settings, obs, "Экспортирует", "Трассы и метрики")
+Rel(billing, obs, "Экспортирует", "Трассы и метрики")
+Rel(admin_bff, obs, "Экспортирует", "Трассы и метрики")
+
+@enduml
